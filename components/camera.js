@@ -1,70 +1,79 @@
-import { CameraView, useCameraPermissions } from 'expo-camera';
-import { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Button, Text, View, StyleSheet } from 'react-native';
-import { useEffect } from 'react';
-export default function Camera({
-  serverIp,
-  serverPort,
-  socket
-}) {
- useEffect(() => {
-  if (
-    socket &&
-    socket.readyState === WebSocket.OPEN
-  ) {
-    socket.send(
-      JSON.stringify({
-        type: "camera-started",
-      })
-    );
-  }
-}, []);
+import { useCameraPermissions } from 'expo-camera'; 
+import { NodePlayer } from 'expo-nodemediaclient';
+
+export default function Camera({ serverIp, serverPort, socket }) {
   const [permission, requestPermission] = useCameraPermissions();
-  // 1. Create a state variable to track if the camera should be open
   const [isCameraActive, setIsCameraActive] = useState(false);
-console.log(
-  `Satellite connected to ${serverIp}:${serverPort}`
-);
-  if (!permission) return <View />;
+  const playerRef = useRef(null);
+
+  // Construct the streaming media URL (adjust protocol/path according to your backend setup)
+  const streamUrl = `rtmp://${serverIp}:${serverPort}/live/stream`; 
+
+  // Handle start action
+  const startCamera = () => {
+    setIsCameraActive(true);
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: "camera-started" }));
+    }
+  };
+
+  // Handle stop action
+  const stopCamera = () => {
+    setIsCameraActive(false);
+    if (playerRef.current) {
+      playerRef.current.stop(); // Explicitly stop playback
+    }
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: "camera-stopped" }));
+    }
+  };
+
+  // Automatically start playback when component becomes active, and clean up when toggled off
+  useEffect(() => {
+    if (isCameraActive && playerRef.current) {
+      playerRef.current.start();
+    }
+    return () => {
+      if (playerRef.current) {
+        playerRef.current.stop();
+      }
+    };
+  }, [isCameraActive]);
+
+  if (!permission) return <View style={styles.container} />;
+
   if (!permission.granted) {
     return (
       <View style={styles.container}>
+        <Text style={styles.text}>Camera permissions are required to use this feature.</Text>
         <Button onPress={requestPermission} title="Grant Permission" />
       </View>
     );
   }
 
-  const stopCamera = () => {
-  setIsCameraActive(false);
-
-  if (
-    socket &&
-    socket.readyState === WebSocket.OPEN
-  ) {
-    socket.send(
-      JSON.stringify({
-        type: "camera-stopped",
-      })
-    );
-  }
-};
   return (
     <View style={styles.container}>
-      {/* 2. Conditionally render the camera based on your state */}
       {isCameraActive ? (
         <View style={styles.cameraContainer}>
-          <CameraView style={{flex:1}} facing="back" />
-          
-          {/* 3. A button overlaid on the camera to "Stop" or close it */}
+          <NodePlayer 
+            ref={playerRef} 
+            inputUrl={streamUrl} // NodePlayer uses inputUrl or url depending on package version
+            bufferTime={1000} 
+            maxBufferTime={2000}
+            scaleMode={"ScaleAspectFit"} 
+            autoplay={true}
+            style={styles.player} 
+          />
           <View style={styles.buttonContainer}>
             <Button title="Stop Camera" onPress={stopCamera} color="red" />
           </View>
         </View>
       ) : (
-        // 4. What the user sees before turning the camera on
         <View style={styles.center}>
-          <Text style={{ marginBottom: 20 }}>Camera is currently off.</Text>
-          <Button title="Start Camera" onPress={() => setIsCameraActive(true)} />
+          <Text style={styles.text}>Camera is currently off.</Text>
+          <Button title="Start Camera" onPress={startCamera} />
         </View>
       )}
     </View>
@@ -72,8 +81,33 @@ console.log(
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center' },
-  cameraContainer: { flex: 1 },
-  buttonContainer: { position: 'absolute', bottom: 50, left: 0, right: 0, alignItems: 'center' },
-  center: { alignItems: 'center' }
+  container: { 
+    flex: 1, 
+    justifyContent: 'center',
+    backgroundColor: '#fff'
+  },
+  cameraContainer: { 
+    flex: 1,
+    backgroundColor: '#000'
+  },
+  player: {
+    flex: 1,
+    width: '100%',
+  },
+  buttonContainer: { 
+    position: 'absolute', 
+    bottom: 50, 
+    left: 0, 
+    right: 0, 
+    alignItems: 'center' 
+  },
+  center: { 
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  text: {
+    marginBottom: 20,
+    fontSize: 16,
+    textAlign: 'center'
+  }
 });
